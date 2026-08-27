@@ -3,8 +3,9 @@ import "./App.css";
 
 const API_BASE = import.meta.env.VITE_API_URL || 
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" 
-    ? "http://localhost:8000" 
+    ? "http://localhost:8080" 
     : window.location.origin);
+
 
 const resizeImage = (file, maxWidth = 1200, maxHeight = 1200) => {
   return new Promise((resolve) => {
