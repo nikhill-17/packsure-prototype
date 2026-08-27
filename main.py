@@ -74,7 +74,7 @@ RULES = [
     },
     {
         "field": "Net Quantity",
-        "pattern": r"(?:Net\s*(?:Wt\.?|Weight|Qty\.?|Quantity|Wt|w)?|Netw|N\.\s*Qty\.?)[^\d\n]*?([\d.]*\d[\d.]*\s?(?:g|kg|ml|l|litre|gram|gm|gms|kgs|ml\.?|ltr|ltrs)s?)",
+        "pattern": r"(?:Net\s*(?:Wt\.?|Weight|Qty\.?|Quantity|Wt|w)?|Netw|N\.\s*Qty\.?|Qty\.?|Non\.?[\s.:]+Qty\.?|Non\.?[\s.:]+QTY\.?|Non\.?)[^\w\n]*?([\d.]+\s?(?:g|kg|ml|l|litre|gram|gm|gms|kgs|ml\.?|ltr|ltrs|9|5)?s?\b)",
         "clause": "Rule 6(1)(b) — Net quantity in standard units must be declared",
     },
     {
@@ -89,7 +89,7 @@ RULES = [
     },
     {
         "field": "Consumer Care Details",
-        "pattern": r"(?:Consumer\s*Care|Customer\s*Care|Toll\s*Free|Care\s*No|Helpline|Consumer\s*Cell)[^\w]*?([A-Za-z0-9@.,\s\-\+\(\)]{5,100})",
+        "pattern": r"(?:Consumer\s*Care|Customer\s*Care|Toll\s*Free|Care\s*No|Helpline|Consumer\s*Cell|Consumer\s*Services(?:\s*Manager)?|Feedback\s*or\s*Queries|Call\s*?Us\s*?At|Email\s*?Us\s*?At)[^\w]*?([A-Za-z0-9@.,\s\-\+\(\)]{5,150})",
         "clause": "Rule 6(1)(d) — Name, address, telephone/email of consumer care",
     },
 ]
@@ -100,7 +100,7 @@ def check_compliance(text: str) -> list[dict]:
     for rule in RULES:
         match = re.search(rule["pattern"], text, re.IGNORECASE)
         if match:
-            extracted_value = match.group(1).strip()
+            extracted_value = match.group(1).strip() if match.group(1) else ""
             field = rule["field"]
             
             # Post-extraction content verification
@@ -137,6 +137,8 @@ def check_compliance(text: str) -> list[dict]:
                     reason = "Net Quantity value is missing (Rule 6(1)(b))"
                 else:
                     qty_match = re.match(r'^([\d.]+)\s*([a-zA-Z]+)$', extracted_value)
+                    misread_match = re.match(r'^(\d+)\s*([95])$', extracted_value)
+                    
                     if qty_match:
                         unit = qty_match.group(2).lower()
                         
@@ -149,6 +151,11 @@ def check_compliance(text: str) -> list[dict]:
                         elif unit not in standard_units:
                             format_status = "INCORRECT_FORMAT"
                             reason = f"Unrecognized unit '{qty_match.group(2)}'"
+                    elif misread_match:
+                        # Recover common OCR digit misreads of standard units (like 9 or 5 instead of g)
+                        format_status = "INCORRECT_FORMAT"
+                        reason = f"Quantity unit misread as '{misread_match.group(2)}' by OCR. Expected standard symbol (g)"
+                        extracted_value = f"{misread_match.group(1)} g"
                     else:
                         format_status = "INCORRECT_FORMAT"
                         reason = "Quantity format should be a number followed by a unit (e.g. '250 g')"
