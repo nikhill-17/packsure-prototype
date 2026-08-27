@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs and OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local data & debug images
+reports/report_*.pdf
+reports/latest_upload.png
+processed_debug.png
+frontend/node_modules/
+frontend/dist/
