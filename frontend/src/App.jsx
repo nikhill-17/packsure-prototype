@@ -6,6 +6,51 @@ const API_BASE = import.meta.env.VITE_API_URL ||
     ? "http://localhost:8000" 
     : window.location.origin);
 
+const resizeImage = (file, maxWidth = 1200, maxHeight = 1200) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            const resizedFile = new File([blob], file.name, {
+              type: file.type,
+              lastModified: Date.now(),
+            });
+            resolve(resizedFile);
+          },
+          file.type,
+          0.85
+        );
+      };
+    };
+  });
+};
+
 export default function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -54,8 +99,11 @@ export default function App() {
     setResult(null);
 
     try {
+      // Resize image on the client side to avoid Render OOM and speed up OCR!
+      const resizedFile = await resizeImage(file, 1200, 1200);
+
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", resizedFile);
 
       const res = await fetch(`${API_BASE}/scan`, {
         method: "POST",
@@ -213,6 +261,9 @@ export default function App() {
             <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-secondary)" }}>
               <div className="spinner" style={{ width: "32px", height: "32px", borderThickness: "3px", margin: "0 auto 16px" }} />
               <p>Executing image pre-processing, OCR, and rules verification engine...</p>
+              <p style={{ fontSize: "12px", marginTop: "16px", color: "var(--text-muted)", maxWidth: "320px", margin: "16px auto 0", lineHeight: "1.4" }}>
+                Note: Deployed backends on Render Free tier go to sleep when inactive. The first scan may take 1-2 minutes to wake up the server.
+              </p>
             </div>
           )}
 
