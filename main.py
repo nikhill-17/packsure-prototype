@@ -314,29 +314,78 @@ async def scan_label(file: UploadFile = File(...)):
     if raw_img is None:
         return {"error": "Failed to decode image"}
         
-    # Pass 1: Try OCR on raw image
-    raw_text = pytesseract.image_to_string(raw_img)
-    raw_results = check_compliance(raw_text)
-    raw_passed = sum(1 for r in raw_results if r["status"] == "PASS")
-    
-    # Pass 2: Try OCR on preprocessed image
-    gray = cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
-    denoised = cv2.fastNlMeansDenoising(gray, h=15)
-    processed_img = cv2.adaptiveThreshold(
-        denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
-    )
-    prep_text = pytesseract.image_to_string(processed_img)
-    prep_results = check_compliance(prep_text)
-    prep_passed = sum(1 for r in prep_results if r["status"] == "PASS")
-    
-    # Heuristic Selection
-    if prep_passed > raw_passed:
-        final_text = prep_text
-        final_results = prep_results
+    # 1. Upscale image to ensure text details are large enough for Tesseract
+    h, w = raw_img.shape[:2]
+    if w < 1800:
+        scale_factor = 1800 / w
+        img_scaled = cv2.resize(raw_img, (1800, int(h * scale_factor)), interpolation=cv2.INTER_CUBIC)
     else:
-        final_text = raw_text
-        final_results = raw_results
+        img_scaled = raw_img
         
+    # Pass 1: Try OCR on raw/scaled image
+    raw_text = pytesseract.image_to_string(img_scaled)
+    raw_results = check_compliance(raw_text)
+    
+    # Grayscale conversion and bilateral filtering for threshold passes
+    gray = cv2.cvtColor(img_scaled, cv2.COLOR_BGR2GRAY)
+    filtered = cv2.bilateralFilter(gray, 9, 75, 75)
+    
+    # Pass 2: Try OCR on Otsu thresholding
+    _, otsu_img = cv2.threshold(filtered, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    otsu_text = pytesseract.image_to_string(otsu_img)
+    otsu_results = check_compliance(otsu_text)
+    
+    # Pass 3: Try OCR on Adaptive thresholding
+    adaptive_img = cv2.adaptiveThreshold(
+        filtered, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
+    )
+    adaptive_text = pytesseract.image_to_string(adaptive_img)
+    adaptive_results = check_compliance(adaptive_text)
+    
+    # Heuristic: Combine results of all passes using a Priority Union Resolution.
+    # We rank each field result:
+    #   Rank 2: PASS and COMPLIANT
+    #   Rank 1: PASS and INCORRECT_FORMAT
+    #   Rank 0: MISSING
+    final_results = []
+    
+    # Get all check fields
+    fields = [rule["field"] for rule in RULES]
+    
+    # Map raw_results, otsu_results, and adaptive_results by field name
+    raw_map = {r["field"]: r for r in raw_results}
+    otsu_map = {r["field"]: r for r in otsu_results}
+    adap_map = {r["field"]: r for r in adaptive_results}
+    
+    def get_rank(result_item):
+        if result_item["status"] == "PASS":
+            if result_item["format_status"] == "COMPLIANT":
+                return 2
+            else:
+                return 1
+        return 0
+        
+    for field in fields:
+        r1 = raw_map[field]
+        r2 = otsu_map[field]
+        r3 = adap_map[field]
+        
+        # Select result with highest rank
+        selected = r1
+        max_rank = get_rank(r1)
+        
+        if get_rank(r2) > max_rank:
+            selected = r2
+            max_rank = get_rank(r2)
+            
+        if get_rank(r3) > max_rank:
+            selected = r3
+            max_rank = get_rank(r3)
+            
+        final_results.append(selected)
+        
+    final_text = f"--- PASS 1 (RAW SCALED) ---\n{raw_text}\n\n--- PASS 2 (OTSU BINARY) ---\n{otsu_text}\n\n--- PASS 3 (ADAPTIVE THRESHOLD) ---\n{adaptive_text}"
+    
     pdf_path = generate_pdf_report(scan_id, final_results, final_text)
 
     compliant_count = sum(1 for r in final_results if r["status"] == "PASS" and r["format_status"] == "COMPLIANT")

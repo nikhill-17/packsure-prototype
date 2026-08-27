@@ -101,7 +101,7 @@ export default function App() {
 
     try {
       // Resize image on the client side to avoid Render OOM and speed up OCR!
-      const resizedFile = await resizeImage(file, 1200, 1200);
+      const resizedFile = await resizeImage(file, 2000, 2000);
 
       const formData = new FormData();
       formData.append("file", resizedFile);
